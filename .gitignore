@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Model weights, checkpoints, and datasets
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+*.h5
+*.ckpt
+runs/
+checkpoints/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Profiling and logs
+*.log
+*.prof
+*.pstats
+wandb/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

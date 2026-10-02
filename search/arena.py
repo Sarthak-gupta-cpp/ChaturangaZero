@@ -1,0 +1,145 @@
+"""
+Arena — pit two players against each other and compute win rates.
+
+Used for:
+1. Gating: challenger vs incumbent after each training iteration
+2. Evaluation: agent vs baselines
+3. Elo computation from round-robin tournaments
+"""
+
+import numpy as np
+from typing import Callable, Optional
+
+
+def play_game(
+    player1: Callable,
+    player2: Callable,
+    initial_state,
+    action_size: int = 4096,
+    verbose: bool = False,
+) -> tuple[float, int, list]:
+    """
+    Play a single game between two players.
+    
+    Args:
+        player1: Callable(state) -> action for player 1 (moves first)
+        player2: Callable(state) -> action for player 2
+        initial_state: Starting game state
+        action_size: Size of action space
+        verbose: Print moves if True
+    
+    Returns:
+        (result, ply_count, move_history)
+        result: +1 if player1 wins, -1 if player2 wins, 0 for draw
+    """
+    state = initial_state
+    move_history = []
+    
+    while True:
+        done, z = state.is_terminal()
+        if done:
+            # z is from the current side-to-move's perspective
+            # Convert to player1's perspective
+            if state.side_to_move == initial_state.side_to_move:
+                result = z
+            else:
+                result = -z
+            return result, state.ply_count, move_history
+        
+        # Current player selects a move
+        if state.side_to_move == initial_state.side_to_move:
+            action = player1(state)
+        else:
+            action = player2(state)
+        
+        if verbose:
+            side = "P1" if state.side_to_move == initial_state.side_to_move else "P2"
+            print(f"  Ply {state.ply_count}: {side} plays action {action}")
+        
+        move_history.append(action)
+        
+        # Apply move
+        if hasattr(state, 'apply'):
+            state = state.apply(action)
+        else:
+            from chaturanga.moves import apply_move
+            state = apply_move(state, action)
+
+
+def arena(
+    player1: Callable,
+    player2: Callable,
+    create_state: Callable,
+    n_games: int = 60,
+    action_size: int = 4096,
+    verbose: bool = False,
+) -> dict:
+    """
+    Play n_games between two players, alternating colors.
+    
+    Args:
+        player1, player2: player callables
+        create_state: factory function returning a fresh starting state
+        n_games: total games to play (should be even for fair color split)
+        action_size: action space size
+        verbose: print progress
+    
+    Returns:
+        dict with 'p1_wins', 'p2_wins', 'draws', 'p1_win_rate', 'results'
+    """
+    p1_wins = 0
+    p2_wins = 0
+    draws = 0
+    results = []
+    
+    for game_idx in range(n_games):
+        state = create_state()
+        
+        # Alternate who goes first
+        if game_idx % 2 == 0:
+            result, plies, _ = play_game(player1, player2, state, action_size)
+        else:
+            result, plies, _ = play_game(player2, player1, state, action_size)
+            result = -result  # Flip to be from player1's perspective
+        
+        if result > 0:
+            p1_wins += 1
+        elif result < 0:
+            p2_wins += 1
+        else:
+            draws += 1
+        
+        results.append(result)
+        
+        if verbose and (game_idx + 1) % 10 == 0:
+            print(f"  Game {game_idx+1}/{n_games}: "
+                  f"P1 {p1_wins}-{draws}-{p2_wins} P2 "
+                  f"(win rate: {p1_wins/(game_idx+1):.1%})")
+    
+    total = n_games
+    return {
+        'p1_wins': p1_wins,
+        'p2_wins': p2_wins,
+        'draws': draws,
+        'p1_win_rate': (p1_wins + 0.5 * draws) / total,
+        'results': results,
+    }
+
+
+def gate_model(
+    challenger: Callable,
+    incumbent: Callable,
+    create_state: Callable,
+    n_games: int = 60,
+    win_threshold: float = 0.55,
+    action_size: int = 4096,
+) -> tuple[bool, dict]:
+    """
+    Arena gating: does the challenger beat the incumbent?
+    
+    Returns:
+        (promoted, stats) — True if challenger's win rate >= threshold.
+    """
+    stats = arena(challenger, incumbent, create_state, n_games, action_size)
+    promoted = stats['p1_win_rate'] >= win_threshold
+    return promoted, stats

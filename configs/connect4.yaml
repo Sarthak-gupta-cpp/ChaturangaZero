@@ -1,0 +1,48 @@
+# connect4.yaml — Phase 0 pipeline proof
+# Connect-4: 6 rows x 7 columns
+
+game: connect4
+
+net:
+  blocks: 3
+  channels: 64
+  action_space: 7
+  input_planes: 3     # our pieces, their pieces, all-ones
+
+mcts:
+  sims: 25
+  c_puct: 1.5
+  dirichlet_alpha: 1.0
+  dirichlet_eps: 0.25
+  virtual_loss: 3
+  reuse_subtree: true
+
+play:
+  temp_moves: 10
+  move_cap: 42        # 6*7 = 42 max moves
+
+train:
+  optimizer: adam
+  lr: 2.0e-3
+  lr_milestones: [30, 60]
+  lr_gamma: 0.1
+  batch_size: 256
+  l2: 1.0e-4
+  buffer_size: 100000
+  steps_per_iter: 500
+  grad_clip: 1.0
+  amp_inference: true
+  mirror_augment: true  # Connect-4 is left-right symmetric
+
+arena:
+  games: 40
+  win_threshold: 0.55
+  every_n_iters: 3
+
+loop:
+  games_per_iter: 100
+  iterations: 50
+  parallel_games: 16
+  workers: 4
+
+seed: 20260829

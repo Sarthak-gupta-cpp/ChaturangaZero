@@ -1,0 +1,65 @@
+# cloud.yaml — GCP training configuration
+# 8 blocks / 128 channels (~2.5M params)
+
+rules:
+  castling:          false
+  pawn_double_step:  false
+  promotion:         mantri_only
+  check_rule:        none
+  stalemate:         side_to_move_wins
+  repetition_draw:   false
+  fifty_move_rule:   false
+  bare_king:         loss
+
+net:
+  blocks: 8
+  channels: 128
+  action_space: 4096
+  input_planes: 14
+
+mcts:
+  sims: 100
+  c_puct: 1.5
+  dirichlet_alpha: 0.3
+  dirichlet_eps: 0.25
+  virtual_loss: 3
+  reuse_subtree: true
+
+play:
+  temp_moves: 20
+  move_cap: 300
+  adjudicate_margin: 4.0
+
+train:
+  optimizer: adam
+  lr: 2.0e-3
+  lr_milestones: [80, 200]
+  lr_gamma: 0.1
+  batch_size: 512
+  l2: 1.0e-4
+  buffer_size: 1000000
+  steps_per_iter: 2000
+  grad_clip: 1.0
+  amp_inference: true
+  mirror_augment: true
+
+arena:
+  games: 60
+  win_threshold: 0.55
+  every_n_iters: 5
+
+loop:
+  games_per_iter: 1000
+  iterations: 300
+  parallel_games: 128
+  workers: 12
+
+cloud:
+  machine: n1-standard-16
+  gpu: nvidia-tesla-t4
+  spot: true
+  bucket: gs://chaturangazero
+  checkpoint_every: 1
+  buffer_snapshot_every: 10
+
+seed: 20260829

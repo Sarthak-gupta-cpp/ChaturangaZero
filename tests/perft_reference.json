@@ -1,0 +1,81 @@
+{
+    "_comment": "Perft reference numbers — to be populated by differential testing.",
+    "_note": "Two independent implementations must agree exactly to depth 6 on all 15 positions.",
+    "positions": [
+        {
+            "name": "initial_position",
+            "description": "Standard Chaturanga starting position",
+            "expected": {"1": 16, "2": 256, "3": 4176, "4": 68133}
+        },
+        {
+            "name": "pawn_promotion",
+            "description": "White Padati one step from promotion on rank 7",
+            "expected": {}
+        },
+        {
+            "name": "bare_king",
+            "description": "One side has only their Raja, opponent has material",
+            "expected": {}
+        },
+        {
+            "name": "king_vs_king",
+            "description": "Both sides have only their Raja",
+            "expected": {}
+        },
+        {
+            "name": "stalemate",
+            "description": "Hand-built stalemate — the +1 terminal test",
+            "expected": {}
+        },
+        {
+            "name": "raja_on_guarded_square",
+            "description": "Raja's only moves are onto guarded squares",
+            "expected": {}
+        },
+        {
+            "name": "gaja_jump",
+            "description": "Gaja's only moves jump over occupied squares",
+            "expected": {}
+        },
+        {
+            "name": "elephant_orbits",
+            "description": "Elephants on all four orbit classes",
+            "expected": {}
+        },
+        {
+            "name": "lone_ratha_endgame",
+            "description": "Endgame with a lone Ratha and Rajas",
+            "expected": {}
+        },
+        {
+            "name": "complex_midgame_1",
+            "description": "A complex midgame position",
+            "expected": {}
+        },
+        {
+            "name": "complex_midgame_2",
+            "description": "Another complex midgame position",
+            "expected": {}
+        },
+        {
+            "name": "raja_capture_imminent",
+            "description": "Position where Raja capture is immediately available",
+            "expected": {}
+        },
+        {
+            "name": "all_pieces_present",
+            "description": "Both sides have all 16 pieces",
+            "expected": {}
+        },
+        {
+            "name": "padati_captures",
+            "description": "Multiple Padati diagonal capture opportunities",
+            "expected": {}
+        },
+        {
+            "name": "ratha_open_file",
+            "description": "Ratha on an open file with long-range moves",
+            "expected": {}
+        }
+    ]
+}
