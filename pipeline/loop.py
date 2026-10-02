@@ -20,6 +20,7 @@ from search.arena import gate_model
 from search.baselines import random_player
 from search.mcts import search, select_action_with_temperature
 from pipeline.selfplay import run_self_play_batch
+from pipeline.inference_server import run_batched_self_play
 
 
 def load_config(config_path: str) -> dict:
@@ -143,42 +144,68 @@ def training_loop(config: dict, output_dir: str = 'runs', resume_from: str = Non
         print(f"\n--- Iteration {iteration+1}/{n_iterations} ---")
         
         # 1. Self-play
-        print(f"Self-play: {games_per_iter} games, {n_sims} sims/move...")
-        evaluate = create_evaluator(net, device=device, action_size=action_size)
-        
-        games = run_self_play_batch(
-            n_games=games_per_iter,
-            create_state=create_state,
-            evaluate=evaluate,
-            action_size=action_size,
-            n_sims=n_sims,
-            c_puct=c_puct,
-            temp_moves=temp_moves,
-            move_cap=move_cap,
-            dirichlet_alpha=config['mcts']['dirichlet_alpha'],
-            dirichlet_eps=config['mcts']['dirichlet_eps'],
-            verbose=True,
-        )
-        
-        # Add games to buffer
+        parallel_games = config['loop'].get('parallel_games', 1)
+        amp = config['train'].get('amp_inference', True)
         mirror_augment = config['train'].get('mirror_augment', True)
-        terminal_stats = {}
-        total_plies = 0
-        
-        for game in games:
-            buffer.add_game(
-                states=game['states'],
-                policies=game['policies'],
-                result=game['result'],
-                mirror_augment=mirror_augment,
-                mirror_perm=mirror_perm,
+
+        if parallel_games > 1:
+            print(f"Batched self-play: {games_per_iter} games, {parallel_games} concurrent, {n_sims} sims/move (AMP={amp})...")
+            sp_stats = run_batched_self_play(
+                net=net,
+                state_cls=create_state,
+                total_games=games_per_iter,
+                num_parallel_games=parallel_games,
+                n_sims=n_sims,
+                action_size=action_size,
+                c_puct=c_puct,
+                dirichlet_alpha=config['mcts']['dirichlet_alpha'],
+                dirichlet_eps=config['mcts']['dirichlet_eps'],
+                temp_threshold=temp_moves,
+                device=device,
+                amp=amp,
+                buffer=buffer,
+                mirror_augmentation=mirror_augment,
             )
-            reason = game['terminal_reason']
-            terminal_stats[reason] = terminal_stats.get(reason, 0) + 1
-            total_plies += game['ply_count']
-        
-        avg_plies = total_plies / len(games)
-        cap_rate = terminal_stats.get('move_cap', 0) / len(games)
+            avg_plies = sp_stats['mean_length']
+            terminal_stats = sp_stats['terminal_reasons']
+            cap_rate = terminal_stats.get('move_cap', 0) / max(sp_stats['games'], 1)
+            print(f"  Speed: {sp_stats['games_per_second']:.2f} games/sec ({sp_stats['elapsed_seconds']:.1f}s)")
+        else:
+            print(f"Sequential self-play: {games_per_iter} games, {n_sims} sims/move...")
+            evaluate = create_evaluator(net, device=device, action_size=action_size)
+            
+            games = run_self_play_batch(
+                n_games=games_per_iter,
+                create_state=create_state,
+                evaluate=evaluate,
+                action_size=action_size,
+                n_sims=n_sims,
+                c_puct=c_puct,
+                temp_moves=temp_moves,
+                move_cap=move_cap,
+                dirichlet_alpha=config['mcts']['dirichlet_alpha'],
+                dirichlet_eps=config['mcts']['dirichlet_eps'],
+                verbose=True,
+            )
+            
+            # Add games to buffer
+            terminal_stats = {}
+            total_plies = 0
+            
+            for game in games:
+                buffer.add_game(
+                    states=game['states'],
+                    policies=game['policies'],
+                    result=game['result'],
+                    mirror_augment=mirror_augment,
+                    mirror_perm=mirror_perm,
+                )
+                reason = game['terminal_reason']
+                terminal_stats[reason] = terminal_stats.get(reason, 0) + 1
+                total_plies += game['ply_count']
+            
+            avg_plies = total_plies / len(games)
+            cap_rate = terminal_stats.get('move_cap', 0) / len(games)
         
         print(f"  Buffer: {len(buffer)} positions")
         print(f"  Avg game length: {avg_plies:.1f} plies")

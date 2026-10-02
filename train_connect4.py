@@ -26,6 +26,7 @@ from net.train import Trainer, create_evaluator
 from search.mcts import search, select_action_with_temperature
 from search.baselines import random_player
 from search.arena import arena
+from pipeline.inference_server import run_batched_self_play
 
 
 def run_phase0(
@@ -34,6 +35,8 @@ def run_phase0(
     n_sims: int = 25,
     steps_per_iter: int = 200,
     batch_size: int = 128,
+    parallel_games: int = 32,
+    save_models: bool = True,
 ):
     """
     Run the Phase 0 Connect-4 pipeline proof.
@@ -63,57 +66,76 @@ def run_phase0(
         print(f"\n--- Iteration {iteration+1}/{n_iterations} ---")
         
         # Self-play
-        evaluate = create_evaluator(net, device=device, action_size=7)
-        
-        game_results = []
-        for g in range(games_per_iter):
-            state = Connect4State()
-            states_enc = []
-            policies = []
+        if parallel_games > 1:
+            sp_stats = run_batched_self_play(
+                net=net,
+                state_cls=Connect4State,
+                total_games=games_per_iter,
+                num_parallel_games=parallel_games,
+                n_sims=n_sims,
+                action_size=7,
+                c_puct=1.5,
+                dirichlet_alpha=1.0,
+                dirichlet_eps=0.25,
+                temp_threshold=10,
+                device=device,
+                amp=(device == 'cuda'),
+                buffer=buffer,
+                mirror_augmentation=True,
+            )
+            print(f"  Self-play: {sp_stats['p1_wins']}W-{sp_stats['draws']}D-{sp_stats['p2_wins']}L, "
+                  f"buffer={len(buffer)}, speed={sp_stats['games_per_second']:.1f} games/s ({sp_stats['elapsed_seconds']:.2f}s)")
+        else:
+            evaluate = create_evaluator(net, device=device, action_size=7)
+            game_results = []
+            for g in range(games_per_iter):
+                state = Connect4State()
+                states_enc = []
+                policies = []
+                
+                while True:
+                    done, z = state.is_terminal()
+                    if done:
+                        result = z if state.side_to_move == 1 else -z
+                        break
+                    
+                    encoded = state.encode()
+                    vc = search(
+                        state=state,
+                        evaluate=evaluate,
+                        n_sims=n_sims,
+                        action_size=7,
+                        c_puct=1.5,
+                        dirichlet_alpha=1.0,
+                        dirichlet_eps=0.25,
+                        add_noise=True,
+                    )
+                    
+                    temperature = 1.0 if state.ply_count < 10 else 0.0
+                    action, pi = select_action_with_temperature(
+                        vc, temperature, state.legal_moves()
+                    )
+                    
+                    states_enc.append(encoded)
+                    policies.append(pi)
+                    state = state.apply(action)
+                
+                # Add to buffer
+                for i, (s, pi) in enumerate(zip(states_enc, policies)):
+                    v = result if i % 2 == 0 else -result
+                    buffer.add(s, pi, v)
+                    
+                    # Mirror augmentation
+                    mirrored_s = np.flip(s, axis=2).copy()
+                    mirrored_pi = pi[::-1].copy()  # Flip column order
+                    buffer.add(mirrored_s, mirrored_pi, v)
+                
+                game_results.append(result)
             
-            while True:
-                done, z = state.is_terminal()
-                if done:
-                    result = z if state.side_to_move == 1 else -z
-                    break
-                
-                encoded = state.encode()
-                vc = search(
-                    state=state,
-                    evaluate=evaluate,
-                    n_sims=n_sims,
-                    action_size=7,
-                    c_puct=1.5,
-                    dirichlet_alpha=1.0,
-                    dirichlet_eps=0.25,
-                    add_noise=True,
-                )
-                
-                temperature = 1.0 if state.ply_count < 10 else 0.0
-                action, pi = select_action_with_temperature(
-                    vc, temperature, state.legal_moves()
-                )
-                
-                states_enc.append(encoded)
-                policies.append(pi)
-                state = state.apply(action)
-            
-            # Add to buffer
-            for i, (s, pi) in enumerate(zip(states_enc, policies)):
-                v = result if i % 2 == 0 else -result
-                buffer.add(s, pi, v)
-                
-                # Mirror augmentation
-                mirrored_s = np.flip(s, axis=2).copy()
-                mirrored_pi = pi[::-1].copy()  # Flip column order
-                buffer.add(mirrored_s, mirrored_pi, v)
-            
-            game_results.append(result)
-        
-        wins = sum(1 for r in game_results if r > 0)
-        losses = sum(1 for r in game_results if r < 0)
-        draws = sum(1 for r in game_results if r == 0)
-        print(f"  Self-play: {wins}W-{draws}D-{losses}L, buffer={len(buffer)}")
+            wins = sum(1 for r in game_results if r > 0)
+            losses = sum(1 for r in game_results if r < 0)
+            draws = sum(1 for r in game_results if r == 0)
+            print(f"  Self-play: {wins}W-{draws}D-{losses}L, buffer={len(buffer)}")
         
         # Training
         if len(buffer) >= batch_size:
@@ -151,11 +173,12 @@ def run_phase0(
                 print(f"Time: {elapsed/60:.1f} minutes")
                 print(f"{'='*50}")
                 
-                # Save checkpoint
-                trainer.save_checkpoint(
-                    'runs/connect4/phase0_passed.pt',
-                    iteration=iteration,
-                )
+                # Save checkpoint if requested
+                if save_models:
+                    trainer.save_checkpoint(
+                        'runs/connect4/phase0_passed.pt',
+                        iteration=iteration,
+                    )
                 return True
         
         iter_time = time.time() - iter_start
@@ -191,8 +214,9 @@ def run_phase0(
     
     print(f"{'='*50}")
     
-    # Save final checkpoint
-    trainer.save_checkpoint('runs/connect4/final.pt', iteration=n_iterations-1)
+    # Save final checkpoint if requested
+    if save_models:
+        trainer.save_checkpoint('runs/connect4/final.pt', iteration=n_iterations-1)
     
     return win_rate >= 0.95
 
@@ -204,6 +228,10 @@ if __name__ == '__main__':
     parser.add_argument('--games', type=int, default=50)
     parser.add_argument('--sims', type=int, default=25)
     parser.add_argument('--steps', type=int, default=200)
+    parser.add_argument('--parallel-games', type=int, default=32,
+                        help='Number of concurrent games in Phase 4 batched self-play (set 1 for sequential)')
+    parser.add_argument('--no-save', action='store_true',
+                        help='Do not save model checkpoints')
     args = parser.parse_args()
     
     run_phase0(
@@ -211,4 +239,6 @@ if __name__ == '__main__':
         games_per_iter=args.games,
         n_sims=args.sims,
         steps_per_iter=args.steps,
+        parallel_games=args.parallel_games,
+        save_models=not args.no_save,
     )
