@@ -37,6 +37,7 @@ def run_phase0(
     batch_size: int = 128,
     parallel_games: int = 32,
     save_models: bool = True,
+    early_stop: bool = True,
 ):
     """
     Run the Phase 0 Connect-4 pipeline proof.
@@ -179,7 +180,8 @@ def run_phase0(
                         'runs/connect4/phase0_passed.pt',
                         iteration=iteration,
                     )
-                return True
+                if early_stop:
+                    return True
         
         iter_time = time.time() - iter_start
         print(f"  Iter time: {iter_time:.1f}s")
@@ -232,6 +234,8 @@ if __name__ == '__main__':
                         help='Number of concurrent games in Phase 4 batched self-play (set 1 for sequential)')
     parser.add_argument('--no-save', action='store_true',
                         help='Do not save model checkpoints')
+    parser.add_argument('--no-early-stop', action='store_true',
+                        help='Continue training for all iterations without early stopping')
     args = parser.parse_args()
     
     run_phase0(
@@ -241,4 +245,5 @@ if __name__ == '__main__':
         steps_per_iter=args.steps,
         parallel_games=args.parallel_games,
         save_models=not args.no_save,
+        early_stop=not args.no_early_stop,
     )
